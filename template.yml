@@ -1,0 +1,28 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SAM template for creating a DynamoDB table,Lambda functions and API gateway for the To-Do List API.
+
+Resources:
+  ToDoTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ToDoTable
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Environment
+          Value: Production 
+
+Outputs:
+  ToDoTableName:
+    Description: Name of the DynamoDB table
+    Value: !Ref ToDoTable
+    Export:
+      Name: ToDoTableName
