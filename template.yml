@@ -1,8 +1,9 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: SAM template for creating a DynamoDB table,Lambda functions and API gateway for the To-Do List API.
+Description: SAM template for creating a DynamoDB table, Lambda functions, and API Gateway for the To-Do List API.
 
 Resources:
+  # DynamoDB Table
   ToDoTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -18,11 +19,97 @@ Resources:
         SSEEnabled: true
       Tags:
         - Key: Environment
-          Value: Production 
+          Value: Production
+
+  # Lambda Function for Creating ToDo Item
+  CreateToDoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CreateToDoFunction
+      CodeUri: src/create_todo/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ToDoTable
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ToDoTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /createTodo
+            Method: POST
+      Tags:
+        Project: "ToDoList"
+      Role: !GetAtt LambdaExecutionRole.Arn # Assign the IAM role to Lambda function
+
+  # IAM Role for Lambda Execution (with CloudWatch logs permissions)
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action: "sts:AssumeRole"
+            Principal:
+              Service: "lambda.amazonaws.com"
+      Policies:
+        - PolicyName: LambdaExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:PutItem"
+                Resource: !GetAtt ToDoTable.Arn
+
+  # API Gateway Resource
+  ToDoApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: "ToDoApi"
+      StageName: prod
+      Cors:
+        AllowMethods: "'POST,OPTIONS'"
+        AllowHeaders: "'Content-Type'"
+        AllowOrigin: "'*'"
+      DefinitionBody:
+        swagger: "2.0"
+        info:
+          title: "ToDo API"
+          version: "1.0"
+        paths:
+          /createTodo:
+            post:
+              summary: "Create a new ToDo item"
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateToDoFunction.Arn}/invocations
+                httpMethod: POST
+                type: aws_proxy
+              responses:
+                "200":
+                  description: "ToDo item created"
+                "500":
+                  description: "Internal Server Error"
 
 Outputs:
+  # DynamoDB Table Name
   ToDoTableName:
     Description: Name of the DynamoDB table
     Value: !Ref ToDoTable
     Export:
       Name: ToDoTableName
+
+  # API Gateway Endpoint
+  ApiEndpoint:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${ToDoApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
