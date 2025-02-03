@@ -36,15 +36,37 @@ Resources:
         Variables:
           TABLE_NAME: !Ref ToDoTable
       Events:
-        ApiEvent:
+        FunctionEvent:
           Type: Api
           Properties:
+            RestApiId: !Ref ToDoApi
             Path: /createTodo
             Method: POST
       Tags:
         Project: "ToDoList"
-      Role: !GetAtt LambdaExecutionRole.Arn # Assign the IAM role to Lambda function
-
+      Role: !GetAtt LambdaExecutionRole.Arn
+  
+  GetToDoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GetToDoFunction
+      CodeUri: src/get_todo/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ToDoTable
+      Events:
+        FunctionEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ToDoApi
+            Path: /getTodo
+            Method: GET
+      Tags:
+        Project: "ToDoList"
+      Role: !GetAtt LambdaExecutionRole.Arn
+    
   # IAM Role for Lambda Execution (with CloudWatch logs permissions)
   LambdaExecutionRole:
     Type: AWS::IAM::Role
@@ -70,6 +92,8 @@ Resources:
               - Effect: "Allow"
                 Action:
                   - "dynamodb:PutItem"
+                  - "dynamodb:GetItem"
+                  - "dynamodb:Scan" 
                 Resource: !GetAtt ToDoTable.Arn
 
   # API Gateway Resource
@@ -79,7 +103,7 @@ Resources:
       Name: "ToDoApi"
       StageName: prod
       Cors:
-        AllowMethods: "'POST,OPTIONS'"
+        AllowMethods: "'GET,POST,OPTIONS'"
         AllowHeaders: "'Content-Type'"
         AllowOrigin: "'*'"
       DefinitionBody:
@@ -100,16 +124,26 @@ Resources:
                   description: "ToDo item created"
                 "500":
                   description: "Internal Server Error"
+          /getTodo:
+            get:
+              summary: "Fetching all ToDo items"
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetToDoFunction.Arn}/invocations
+                httpMethod: GET
+                type: aws_proxy
+              responses:
+                "200":
+                  description: "ToDo items fetched"
+                "500":
+                  description: "Internal Server Error"
 
 Outputs:
-  # DynamoDB Table Name
   ToDoTableName:
     Description: Name of the DynamoDB table
     Value: !Ref ToDoTable
     Export:
       Name: ToDoTableName
 
-  # API Gateway Endpoint
   ApiEndpoint:
     Description: "API Gateway endpoint URL"
     Value: !Sub "https://${ToDoApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
