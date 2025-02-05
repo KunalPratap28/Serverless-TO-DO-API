@@ -12,7 +12,7 @@ def create_todo_item(data):
         "id":item_id,
         "title":data.get("title"),
         "description":data.get("description"),
-        "isCompleted":True if data.get("isCompleted") == "Y" else False
+        "isCompleted":data.get("isCompleted")
     }
     table.put_item(Item=todo_item)
     return todo_item
