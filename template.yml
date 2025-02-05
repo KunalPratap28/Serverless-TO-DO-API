@@ -29,9 +29,7 @@ Resources:
       CodeUri: src/create_todo/
       Handler: app.lambda_handler
       Runtime: python3.9
-      Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref ToDoTable
+      Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
         Variables:
           TABLE_NAME: !Ref ToDoTable
@@ -41,11 +39,9 @@ Resources:
           Properties:
             RestApiId: !Ref ToDoApi
             Path: /createTodo
-            Method: POST
+            Method: post
       Tags:
         Project: "ToDoList"
-      Role: !GetAtt LambdaExecutionRole.Arn
-  
   GetToDoFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -66,11 +62,33 @@ Resources:
       Tags:
         Project: "ToDoList"
       Role: !GetAtt LambdaExecutionRole.Arn
-    
+
+  UpdateToDoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: UpdateToDoFunction
+      CodeUri: src/update_todo/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ToDoTable
+      Events:
+        FunctionEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ToDoApi
+            Path: /todos/{id}
+            Method: put
+      Tags:
+        Project: "ToDoList"
+
   # IAM Role for Lambda Execution (with CloudWatch logs permissions)
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: LambdaDynamoDBExecutionRole
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -79,7 +97,47 @@ Resources:
             Principal:
               Service: "lambda.amazonaws.com"
       Policies:
-        - PolicyName: LambdaExecutionPolicy
+        - PolicyName: LambdaDynamoDBPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:PutItem"
+                  - "dynamodb:GetItem"
+                  - "dynamodb:UpdateItem"
+                  - "dynamodb:DeleteItem"
+                  - "dynamodb:Scan"
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ToDoTable"
+
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "lambda:InvokeFunction"
+                Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}*"
+
+  APIGatewayExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: APIGatewayExecutionRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "apigateway.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: APIGatewayLoggingAndInvokePolicy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -88,7 +146,7 @@ Resources:
                   - "logs:CreateLogGroup"
                   - "logs:CreateLogStream"
                   - "logs:PutLogEvents"
-                Resource: "*"
+                Resource: !Sub "arn:aws:logs:ap-south-1:${AWS::AccountId}:log-group:/aws/apigateway/*"
               - Effect: "Allow"
                 Action:
                   - "dynamodb:PutItem"
@@ -100,42 +158,119 @@ Resources:
   ToDoApi:
     Type: AWS::Serverless::Api
     Properties:
-      Name: "ToDoApi"
       StageName: prod
+      MethodSettings:
+        - HttpMethod: '*'
+          ResourcePath: /*
+          LoggingLevel: ERROR
+          DataTraceEnabled: false
+          MetricsEnabled: true
       Cors:
-        AllowMethods: "'GET,POST,OPTIONS'"
-        AllowHeaders: "'Content-Type'"
+        AllowMethods: "'GET,POST,PUT,OPTIONS'"
+        AllowHeaders: "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token"
         AllowOrigin: "'*'"
+      GatewayResponses:
+        UNAUTHORIZED:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "*"
       DefinitionBody:
         swagger: "2.0"
         info:
-          title: "ToDo API"
+          title: "ToDoApi"
           version: "1.0"
+        x-amazon-apigateway-request-validators:
+          basic:
+            validateRequestBody: true
+            validateRequestParameters: true
+          params-only:
+            validateRequestBody: true
+            validateRequestParameters: false
+        x-amazon-apigateway-request-validator: basic
         paths:
           /createTodo:
             post:
               summary: "Create a new ToDo item"
               x-amazon-apigateway-integration:
-                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateToDoFunction.Arn}/invocations
-                httpMethod: POST
+                uri: !Sub arn:aws:apigateway:ap-south-1:lambda:path/2015-03-31/functions/${CreateToDoFunction.Arn}/invocations
+                credentials: !GetAtt APIGatewayExecutionRole.Arn 
+                httpMethod: post
                 type: aws_proxy
               responses:
                 "200":
-                  description: "ToDo item created"
+                  description: "Successful response"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+                "204":
+                  description: "No content"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+                "401":
+                  description: "Unauthorized"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
                 "500":
-                  description: "Internal Server Error"
+                  description: "Server error"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
           /getTodo:
             get:
               summary: "Fetching all ToDo items"
               x-amazon-apigateway-integration:
                 uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetToDoFunction.Arn}/invocations
+                credentials: !GetAtt APIGatewayExecutionRole.Arn 
                 httpMethod: GET
                 type: aws_proxy
               responses:
                 "200":
-                  description: "ToDo items fetched"
+                  description: "Successful response"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+                "204":
+                  description: "No content"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+                "401":
+                  description: "Unauthorized"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
                 "500":
-                  description: "Internal Server Error"
+                  description: "Server error"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+          /updateTodo/{id}:
+            put:
+              summary: "Update an existing ToDo item by ID"
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:ap-south-1:lambda:path/2015-03-31/functions/${UpdateToDoFunction.Arn}/invocations
+                credentials: !GetAtt APIGatewayExecutionRole.Arn 
+                httpMethod: put
+                type: aws_proxy
+              responses:
+                "200":
+                  description: "Successful response"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+                "204":
+                  description: "No content"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+                "401":
+                  description: "Unauthorized"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+                "500":
 
 Outputs:
   ToDoTableName:
