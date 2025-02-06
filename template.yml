@@ -79,7 +79,28 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref ToDoApi
-            Path: /todos/{id}
+            Path: /updateTodo/{id}
+            Method: put
+      Tags:
+        Project: "ToDoList"
+    
+  DeleteToDoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: DeleteToDoFunction
+      CodeUri: src/delete_todo/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ToDoTable
+      Events:
+        FunctionEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ToDoApi
+            Path: /deleteTodo/{id}
             Method: put
       Tags:
         Project: "ToDoList"
@@ -152,6 +173,8 @@ Resources:
                   - "dynamodb:PutItem"
                   - "dynamodb:GetItem"
                   - "dynamodb:Scan" 
+                  - "dynamodb:UpdateItem"
+                  - "dynamodb:DeleteItem"
                 Resource: !GetAtt ToDoTable.Arn
 
   # API Gateway Resource
@@ -160,15 +183,15 @@ Resources:
     Properties:
       StageName: prod
       MethodSettings:
-        - HttpMethod: '*'
-          ResourcePath: /*
+        - HttpMethod: "*"
+          ResourcePath: "/"
           LoggingLevel: ERROR
           DataTraceEnabled: false
           MetricsEnabled: true
       Cors:
-        AllowMethods: "'GET,POST,PUT,OPTIONS'"
+        AllowMethods: "GET,POST,PUT,OPTIONS"
         AllowHeaders: "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token"
-        AllowOrigin: "'*'"
+        AllowOrigin: "*"
       GatewayResponses:
         UNAUTHORIZED:
           ResponseParameters:
@@ -271,6 +294,39 @@ Resources:
                     Access-Control-Allow-Origin:
                       type: string
                 "500":
+                  description: "Server error"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+          /deleteTodo/{id}:
+            delete:
+              summary: "Delete an existing ToDo item by ID"
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:ap-south-1:lambda:path/2015-03-31/functions/${DeleteToDoFunction.Arn}/invocations
+                credentials: !GetAtt APIGatewayExecutionRole.Arn 
+                httpMethod: delete
+                type: aws_proxy
+              responses:
+                "200":
+                  description: "Successful response"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+                "204":
+                  description: "No content"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+                "401":
+                  description: "Unauthorized"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+                "500":
+                  description: "Server error"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string 
 
 Outputs:
   ToDoTableName:
